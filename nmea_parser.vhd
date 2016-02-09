@@ -10,6 +10,7 @@ entity nmea_parser is
             
             NMEA_EN_IN      : IN  STD_LOGIC;
             NMEA_DATA_IN    : IN  STD_LOGIC_VECTOR(7 downto 0);
+            PPS_IN          : IN  STD_LOGIC;
 
             ADDR_IN         : IN  STD_LOGIC_VECTOR(7 downto 0);
             DATA_OUT        : OUT  STD_LOGIC_VECTOR(7 downto 0));
@@ -32,6 +33,11 @@ begin
 end function;
 
 constant C_start_sentence_delimiter : std_logic_vector(7 downto 0) := to_slv("$");
+constant C_comma                    : std_logic_vector(7 downto 0) := to_slv(",");
+constant C_decimal_point            : std_logic_vector(7 downto 0) := to_slv(".");
+
+constant C_max_comma_count          : unsigned(7 downto 0) := X"1F";
+constant C_km_per_hr_index          : unsigned(7 downto 0) := X"07";
 
 constant C_GP       : std_logic_vector(15 downto 0) := to_slv("GP");
 constant C_GPVTG    : std_logic_vector(39 downto 0) := to_slv("GPVTG");
@@ -45,6 +51,13 @@ signal nmea_data_ini_ini, nmea_data_ini, nmea_data  : std_logic_vector(7 downto 
 signal nmea_data_valid                              : std_logic := '0';
 
 signal nmea_tag_val                                 : std_logic_vector(23 downto 0) := (others => '0');
+signal comma_count                                  : unsigned(7 downto 0) := (others => '0');
+signal checksum_val                                 : std_logic_vector(7 downto 0) := (others => '0');
+
+signal velocity_int_count, velocity_dec_count       : unsigned(3 downto 0) := (others => '0');
+signal velocity_int_len, velocity_dec_len           : unsigned(3 downto 0) := (others => '0');
+
+signal velocity_int, velocity_dec                   : std_logic_vector(47 downto 0) := (others => '0');
 
 type NMEA_PARSE_STATE is (
                             IDLE,
@@ -55,6 +68,9 @@ type NMEA_PARSE_STATE is (
                             COLLECT_TAG_VAL2,
                             PARSE_TAG_VAL,
                             PARSE_GPVTG_SENTENCE0,
+                            PARSE_GPVTG_SENTENCE1,
+                            PARSE_GPVTG_SENTENCE2,
+                            PARSE_GPVTG_SENTENCE3,
 
                             PARSE_GPGGA_SENTENCE0,
 
@@ -63,6 +79,8 @@ type NMEA_PARSE_STATE is (
                             PARSE_GPGSA_SENTENCE0,
 
                             PARSE_GPGSV_SENTENCE0,
+
+                            GET_CHECKSUM,
 
                             COMPLETE
                         );
@@ -151,7 +169,29 @@ begin
                 end if;
 
             when PARSE_GPVTG_SENTENCE0 =>
-                np_st_next <= COMPLETE;
+                if comma_count = C_km_per_hr_index then
+                    np_st_next <= PARSE_GPVTG_SENTENCE1;
+                elsif comma_count = C_max_comma_count then
+                    np_st_next <= COMPLETE;
+                end if;
+            when PARSE_GPVTG_SENTENCE1 =>
+                if nmea_data_valid = '1' then
+                    if nmea_data = C_decimal_point then
+                        np_st_next <= PARSE_GPVTG_SENTENCE2;
+                    end if;
+                end if;
+            when PARSE_GPVTG_SENTENCE2 =>
+                if nmea_data_valid = '1' then
+                    if nmea_data = C_comma then
+                        np_st_next <= PARSE_GPVTG_SENTENCE3;
+                    end if;
+                end if;
+            when PARSE_GPVTG_SENTENCE3 =>
+                if nmea_data_valid = '1' then
+                    if nmea_data = C_comma then
+                        np_st_next <= GET_CHECKSUM;
+                    end if;
+                end if;
 
             when PARSE_GPGGA_SENTENCE0 =>
                 np_st_next <= COMPLETE;
@@ -164,6 +204,8 @@ begin
 
             when PARSE_GPGSV_SENTENCE0 =>
                 np_st_next <= COMPLETE;
+
+            when GET_CHECKSUM =>
 
             when COMPLETE =>
                 np_st_next <= IDLE;
@@ -181,6 +223,86 @@ begin
                     nmea_tag_val(15 downto 8) <= nmea_data;
                 elsif np_st = COLLECT_TAG_VAL2 then
                     nmea_tag_val(7 downto 0) <= nmea_data;
+                end if;
+            end if;
+        end if;
+    end process;
+
+    NUM_COMMAS: process(CLK_IN)
+    begin
+        if rising_edge(CLK_IN) then
+            if nmea_data_valid = '1' then
+                if np_st = COLLECT_TAG_VAL2 then
+                    comma_count <= (others => '0');
+                elsif nmea_data = C_comma then
+                    comma_count <= comma_count + 1;
+                end if;
+            end if;
+        end if;
+    end process;
+
+    CHECKSUM: process(CLK_IN)
+    begin
+        if rising_edge(CLK_IN) then
+            if nmea_data_valid = '1' then
+                if np_st = IDLE then
+                    checksum_val <= (others => '0');
+                else
+                    checksum_val <= checksum_val xor nmea_data;
+                end if;
+            end if;
+        end if;
+    end process;
+
+    GPGVTG_PARSE: process(CLK_IN)
+    begin
+        if rising_edge(CLK_IN) then
+            if nmea_data_valid = '1' then
+                if np_st = PARSE_GPVTG_SENTENCE1 then
+                    if velocity_int_count = X"0" then
+                        velocity_int(47 downto 40) <= nmea_data;
+                    elsif velocity_int_count = X"1" then
+                        velocity_int(39 downto 32) <= nmea_data;
+                    elsif velocity_int_count = X"2" then
+                        velocity_int(31 downto 24) <= nmea_data;
+                    elsif velocity_int_count = X"3" then
+                        velocity_int(23 downto 16) <= nmea_data;
+                    elsif velocity_int_count = X"4" then
+                        velocity_int(15 downto 8) <= nmea_data;
+                    elsif velocity_int_count = X"5" then
+                        velocity_int(7 downto 0) <= nmea_data;
+                    end if;
+                end if;
+                if np_st = PARSE_GPVTG_SENTENCE1 then
+                    velocity_int_count <= velocity_int_count + 1;
+                else
+                    velocity_int_count <= X"0";
+                end if;
+                if np_st = PARSE_GPVTG_SENTENCE1 then
+                    velocity_int_len <= velocity_int_count;
+                end if;
+                if np_st = PARSE_GPVTG_SENTENCE2 then
+                    if velocity_dec_count = X"0" then
+                        velocity_dec(47 downto 40) <= nmea_data;
+                    elsif velocity_dec_count = X"1" then
+                        velocity_dec(39 downto 32) <= nmea_data;
+                    elsif velocity_dec_count = X"2" then
+                        velocity_dec(31 downto 24) <= nmea_data;
+                    elsif velocity_dec_count = X"3" then
+                        velocity_dec(23 downto 16) <= nmea_data;
+                    elsif velocity_dec_count = X"4" then
+                        velocity_dec(15 downto 8) <= nmea_data;
+                    elsif velocity_dec_count = X"5" then
+                        velocity_dec(7 downto 0) <= nmea_data;
+                    end if;
+                end if;
+                if np_st = PARSE_GPVTG_SENTENCE2 then
+                    velocity_dec_count <= velocity_dec_count + 1;
+                else
+                    velocity_dec_count <= X"0";
+                end if;
+                if np_st = PARSE_GPVTG_SENTENCE2 then
+                    velocity_dec_len <= velocity_dec_count;
                 end if;
             end if;
         end if;

@@ -41,22 +41,23 @@ ARCHITECTURE behavior OF TB_nmea_parser IS
  
     COMPONENT nmea_parser
     PORT(
-         CLK_IN : IN  std_logic;
-         RST_IN : IN  std_logic;
-         NMEA_EN_IN : IN  std_logic;
-         NMEA_DATA_IN : IN  std_logic_vector(7 downto 0);
-         ADDR_IN : IN  std_logic_vector(7 downto 0);
-         DATA_OUT : OUT  std_logic_vector(7 downto 0)
-        );
+         CLK_IN         : IN  std_logic;
+         RST_IN         : IN  std_logic;
+         NMEA_EN_IN     : IN  std_logic;
+         NMEA_DATA_IN   : IN  std_logic_vector(7 downto 0);
+         PPS_IN         : IN  STD_LOGIC;
+         ADDR_IN        : IN  std_logic_vector(7 downto 0);
+         DATA_OUT       : OUT  std_logic_vector(7 downto 0));
     END COMPONENT;
     
 
    --Inputs
-   signal CLK_IN : std_logic := '0';
-   signal RST_IN : std_logic := '0';
-   signal NMEA_EN_IN : std_logic := '0';
-   signal NMEA_DATA_IN : std_logic_vector(7 downto 0) := (others => '0');
-   signal ADDR_IN : std_logic_vector(7 downto 0) := (others => '0');
+   signal CLK_IN        : std_logic := '0';
+   signal RST_IN        : std_logic := '0';
+   signal NMEA_EN_IN    : std_logic := '0';
+	signal PPS_IN 			: std_logic := '0';
+   signal NMEA_DATA_IN  : std_logic_vector(7 downto 0) := (others => '0');
+   signal ADDR_IN       : std_logic_vector(7 downto 0) := (others => '0');
 
  	--Outputs
    signal DATA_OUT : std_logic_vector(7 downto 0);
@@ -68,12 +69,13 @@ BEGIN
  
 	-- Instantiate the Unit Under Test (UUT)
    uut: nmea_parser PORT MAP (
-          CLK_IN => CLK_IN,
-          RST_IN => RST_IN,
-          NMEA_EN_IN => NMEA_EN_IN,
-          NMEA_DATA_IN => NMEA_DATA_IN,
-          ADDR_IN => ADDR_IN,
-          DATA_OUT => DATA_OUT
+          CLK_IN        => CLK_IN,
+          RST_IN        => RST_IN,
+          NMEA_EN_IN    => NMEA_EN_IN,
+          NMEA_DATA_IN  => NMEA_DATA_IN,
+          PPS_IN        => PPS_IN,
+          ADDR_IN       => ADDR_IN,
+          DATA_OUT      => DATA_OUT
         );
 
    -- Clock process definitions
