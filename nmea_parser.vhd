@@ -10,13 +10,14 @@ entity nmea_parser is
             
             NMEA_EN_IN      : IN  STD_LOGIC;
             NMEA_DATA_IN    : IN  STD_LOGIC_VECTOR(7 downto 0);
-            PPS_IN          : IN  STD_LOGIC;
 
             ADDR_IN         : IN  STD_LOGIC_VECTOR(7 downto 0);
             DATA_OUT        : OUT  STD_LOGIC_VECTOR(7 downto 0));
 end nmea_parser;
 
 architecture Behavioral of nmea_parser is
+
+subtype slv is std_logic_vector;
 
 function to_slv(s: string) return std_logic_vector is 
     constant ss: string(1 to s'length) := s; 
@@ -35,29 +36,52 @@ end function;
 constant C_start_sentence_delimiter : std_logic_vector(7 downto 0) := to_slv("$");
 constant C_comma                    : std_logic_vector(7 downto 0) := to_slv(",");
 constant C_decimal_point            : std_logic_vector(7 downto 0) := to_slv(".");
+constant C_star                     : std_logic_vector(7 downto 0) := to_slv("*");
 
 constant C_max_comma_count          : unsigned(7 downto 0) := X"1F";
 constant C_km_per_hr_index          : unsigned(7 downto 0) := X"07";
+constant C_time_comma_count         : unsigned(7 downto 0) := X"01";
+constant C_is_locked_comma_count    : unsigned(7 downto 0) := X"06";
 
-constant C_GP       : std_logic_vector(15 downto 0) := to_slv("GP");
-constant C_GPVTG    : std_logic_vector(39 downto 0) := to_slv("GPVTG");
-constant C_GPGGA    : std_logic_vector(39 downto 0) := to_slv("GPGGA");
-constant C_GPRMC    : std_logic_vector(39 downto 0) := to_slv("GPRMC");
-constant C_GPGSA    : std_logic_vector(39 downto 0) := to_slv("GPGSA");
-constant C_GPGSV    : std_logic_vector(39 downto 0) := to_slv("GPGSV");
+constant C_GP                   : std_logic_vector(15 downto 0) := to_slv("GP");
+constant C_GPVTG                : std_logic_vector(39 downto 0) := to_slv("GPVTG");
+constant C_GPGGA                : std_logic_vector(39 downto 0) := to_slv("GPGGA");
+constant C_GPRMC                : std_logic_vector(39 downto 0) := to_slv("GPRMC");
+constant C_GPGSA                : std_logic_vector(39 downto 0) := to_slv("GPGSA");
+constant C_GPGSV                : std_logic_vector(39 downto 0) := to_slv("GPGSV");
 
-signal nmea_en_prev, nmea_en                        : std_logic := '0';
-signal nmea_data_ini_ini, nmea_data_ini, nmea_data  : std_logic_vector(7 downto 0) := (others => '0');
-signal nmea_data_valid                              : std_logic := '0';
+constant C_GPVTG_Return_State   : std_logic_vector(3 downto 0) := X"0";
+constant C_GPGGA_Return_State   : std_logic_vector(3 downto 0) := X"1";
+constant C_GPRMC_Return_State   : std_logic_vector(3 downto 0) := X"2";
+constant C_GPGSA_Return_State   : std_logic_vector(3 downto 0) := X"3";
+constant C_GPGSV_Return_State   : std_logic_vector(3 downto 0) := X"4";
 
-signal nmea_tag_val                                 : std_logic_vector(23 downto 0) := (others => '0');
-signal comma_count                                  : unsigned(7 downto 0) := (others => '0');
-signal checksum_val                                 : std_logic_vector(7 downto 0) := (others => '0');
+signal nmea_en_prev, nmea_en                            : std_logic := '0';
+signal nmea_data_ini_ini, nmea_data_ini, nmea_data      : std_logic_vector(7 downto 0) := (others => '0');
+signal nmea_data_valid                                  : std_logic := '0';
 
-signal velocity_int_count, velocity_dec_count       : unsigned(3 downto 0) := (others => '0');
-signal velocity_int_len, velocity_dec_len           : unsigned(3 downto 0) := (others => '0');
+signal nmea_tag_val                                     : std_logic_vector(23 downto 0) := (others => '0');
+signal comma_count                                      : unsigned(7 downto 0) := (others => '0');
+signal checksum_final, checksum_val                     : std_logic_vector(7 downto 0) := (others => '0');
+signal checksum_parsed                                  : unsigned(7 downto 0) := (others => '0');
 
-signal velocity_int, velocity_dec                   : std_logic_vector(47 downto 0) := (others => '0');
+signal velocity_int_count, velocity_dec_count           : unsigned(3 downto 0) := (others => '0');
+signal velocity_int_len, velocity_dec_len               : unsigned(3 downto 0) := (others => '0');
+signal velocity_int_len_rd, velocity_dec_len_rd         : std_logic_vector(3 downto 0) := (others => '0');
+
+signal velocity_int, velocity_dec                       : std_logic_vector(47 downto 0) := (others => '0');
+signal velocity_int_rd, velocity_dec_rd                 : std_logic_vector(47 downto 0) := (others => '0');
+
+signal state_after_checksum                             : std_logic_vector(3 downto 0) := (others => '0');
+
+signal time_val, time_val_rd                            : std_logic_vector(47 downto 0) := (others => '0');
+signal time_val_count                                   : unsigned(3 downto 0) := (others => '0');
+
+signal is_locked, is_locked_rd                          : std_logic_vector(7 downto 0);
+
+signal num_satellites, num_satellites_rd                : std_logic_vector(15 downto 0);
+signal num_satellites_count, num_satellites_count_final : unsigned(3 downto 0) := (others => '0');
+signal num_satellites_count_rd                          : std_logic_vector(3 downto 0);
 
 type NMEA_PARSE_STATE is (
                             IDLE,
@@ -67,20 +91,31 @@ type NMEA_PARSE_STATE is (
                             COLLECT_TAG_VAL1,
                             COLLECT_TAG_VAL2,
                             PARSE_TAG_VAL,
+
                             PARSE_GPVTG_SENTENCE0,
                             PARSE_GPVTG_SENTENCE1,
                             PARSE_GPVTG_SENTENCE2,
                             PARSE_GPVTG_SENTENCE3,
 
                             PARSE_GPGGA_SENTENCE0,
+                            PARSE_GPGGA_SENTENCE1,
+                            PARSE_GPGGA_SENTENCE2,
+                            PARSE_GPGGA_SENTENCE3,
+                            PARSE_GPGGA_SENTENCE4,
 
-                            PARSE_GPRMC_SENTENCE0,
-
-                            PARSE_GPGSA_SENTENCE0,
-
-                            PARSE_GPGSV_SENTENCE0,
+                            PARSE_GPRMC_SENTENCE0, -- TODO
+                            PARSE_GPGSA_SENTENCE0, -- TODO
+                            PARSE_GPGSV_SENTENCE0, -- TODO
 
                             GET_CHECKSUM,
+                            PARSE_CHECKSUM0,
+                            PARSE_CHECKSUM1,
+
+                            CHECK_CHECKSUM,
+                            GOTO_POST_CHECKSUM_STATE,
+
+                            WRITE_GPVTG_VALUES,
+                            WRITE_GPGGA_VALUES,
 
                             COMPLETE
                         );
@@ -112,7 +147,7 @@ begin
         end if;
     end process;
 
-    MAIN_STATE_DECODE: process (np_st, nmea_data_valid, nmea_data)
+    MAIN_STATE_DECODE: process (np_st, nmea_data_valid, nmea_data, nmea_tag_val, comma_count)
     begin
         np_st_next <= np_st; -- default to remain in same state
         case (np_st) is
@@ -194,7 +229,33 @@ begin
                 end if;
 
             when PARSE_GPGGA_SENTENCE0 =>
-                np_st_next <= COMPLETE;
+                if comma_count = C_time_comma_count then
+                    np_st_next <= PARSE_GPGGA_SENTENCE1;
+                elsif comma_count = C_max_comma_count then
+                    np_st_next <= COMPLETE;
+                end if;
+            when PARSE_GPGGA_SENTENCE1 =>
+                if nmea_data_valid = '1' then
+                    if nmea_data = C_comma then
+                        np_st_next <= PARSE_GPGGA_SENTENCE2;
+                    end if;
+                end if;
+            when PARSE_GPGGA_SENTENCE2 =>
+                if nmea_data_valid = '1' then
+                    if comma_count = C_is_locked_comma_count then
+                        np_st_next <= PARSE_GPGGA_SENTENCE3;
+                    end if;
+                end if;
+            when PARSE_GPGGA_SENTENCE3 =>
+                if nmea_data_valid = '1' then
+                    np_st_next <= PARSE_GPGGA_SENTENCE4;
+                end if;
+            when PARSE_GPGGA_SENTENCE4 =>
+                if nmea_data_valid = '1' then
+                    if nmea_data = C_comma then
+                        np_st_next <= GET_CHECKSUM;
+                    end if;
+                end if;
 
             when PARSE_GPRMC_SENTENCE0 =>
                 np_st_next <= COMPLETE;
@@ -206,6 +267,42 @@ begin
                 np_st_next <= COMPLETE;
 
             when GET_CHECKSUM =>
+                if nmea_data_valid = '1' then
+                    if nmea_data = C_star then
+                        np_st_next <= PARSE_CHECKSUM0;
+                    end if;
+                end if;
+            when PARSE_CHECKSUM0 =>
+                if nmea_data_valid = '1' then
+                    np_st_next <= PARSE_CHECKSUM1;
+                end if;
+            when PARSE_CHECKSUM1 =>
+                if nmea_data_valid = '1' then
+                    np_st_next <= CHECK_CHECKSUM;
+                end if;
+            when CHECK_CHECKSUM =>
+                if checksum_parsed = unsigned(checksum_final) then
+                    np_st_next <= GOTO_POST_CHECKSUM_STATE;
+                else
+                    np_st_next <= COMPLETE;
+                end if;
+            when GOTO_POST_CHECKSUM_STATE =>
+                if state_after_checksum = C_GPVTG_Return_State then
+                    np_st_next <= WRITE_GPVTG_VALUES;
+                elsif state_after_checksum = C_GPGGA_Return_State then
+                    np_st_next <= WRITE_GPGGA_VALUES;
+                elsif state_after_checksum = C_GPRMC_Return_State then -- TODO
+                    np_st_next <= COMPLETE;
+                elsif state_after_checksum = C_GPGSA_Return_State then -- TODO
+                    np_st_next <= COMPLETE;
+                elsif state_after_checksum = C_GPGSV_Return_State then -- TODO
+                    np_st_next <= COMPLETE;
+                end if;
+
+            when WRITE_GPVTG_VALUES =>
+                np_st_next <= COMPLETE;
+            when WRITE_GPGGA_VALUES =>
+                np_st_next <= COMPLETE;
 
             when COMPLETE =>
                 np_st_next <= IDLE;
@@ -249,6 +346,9 @@ begin
                     checksum_val <= (others => '0');
                 else
                     checksum_val <= checksum_val xor nmea_data;
+                end if;
+                if np_st = GET_CHECKSUM then
+                    checksum_final <= checksum_val;
                 end if;
             end if;
         end if;
@@ -304,6 +404,164 @@ begin
                 if np_st = PARSE_GPVTG_SENTENCE2 then
                     velocity_dec_len <= velocity_dec_count;
                 end if;
+            end if;
+        end if;
+    end process;
+
+    GPGGA_PARSE: process(CLK_IN)
+    begin
+        if rising_edge(CLK_IN) then
+            if nmea_data_valid = '1' then
+                if np_st = PARSE_GPGGA_SENTENCE1 then
+                    if time_val_count = X"0" then
+                        time_val(47 downto 40) <= nmea_data;
+                    elsif time_val_count = X"1" then
+                        time_val(39 downto 32) <= nmea_data;
+                    elsif time_val_count = X"2" then
+                        time_val(31 downto 24) <= nmea_data;
+                    elsif time_val_count = X"3" then
+                        time_val(23 downto 16) <= nmea_data;
+                    elsif time_val_count = X"4" then
+                        time_val(15 downto 8) <= nmea_data;
+                    elsif time_val_count = X"5" then
+                        time_val(7 downto 0) <= nmea_data;
+                    end if;
+                end if;
+                if np_st = PARSE_GPGGA_SENTENCE1 then
+                    time_val_count <= time_val_count + 1;
+                else
+                    time_val_count <= X"0";
+                end if;
+                if np_st = PARSE_GPGGA_SENTENCE2 then
+                    if nmea_data /= C_comma then
+                        is_locked <= nmea_data;
+                    end if;
+                end if;
+                if np_st = PARSE_GPGGA_SENTENCE4 then
+                    if num_satellites_count = X"0" then
+                        num_satellites(15 downto 8) <= nmea_data;
+                    elsif num_satellites_count = X"1" then
+                        num_satellites(7 downto 0) <= nmea_data;
+                    end if;
+                end if;
+                if np_st = PARSE_GPGGA_SENTENCE4 then
+                    num_satellites_count <= num_satellites_count + 1;
+                else
+                    num_satellites_count <= X"0";
+                end if;
+                if np_st = PARSE_GPGGA_SENTENCE4 then
+                    num_satellites_count_final <= num_satellites_count;
+                end if;
+            end if;
+        end if;
+    end process;
+
+    GET_CHECKSUM_VAL: process(CLK_IN)
+    begin
+        if rising_edge(CLK_IN) then
+            if nmea_data_valid = '1' then
+                if np_st = PARSE_CHECKSUM0 then
+                    if nmea_data(7 downto 4) = X"3" then
+                        checksum_parsed(7 downto 4) <= unsigned(nmea_data(3 downto 0));
+                    else
+                        checksum_parsed(7 downto 4) <= unsigned(nmea_data(3 downto 0)) + 9;
+                    end if;
+                elsif np_st = PARSE_CHECKSUM1 then
+                    if nmea_data(7 downto 4) = X"3" then
+                        checksum_parsed(3 downto 0) <= unsigned(nmea_data(3 downto 0));
+                    else
+                        checksum_parsed(3 downto 0) <= unsigned(nmea_data(3 downto 0)) + 9;
+                    end if;
+                end if;
+            end if;
+        end if;
+    end process;
+
+    RETURN_STATE: process(CLK_IN)
+    begin
+        if rising_edge(CLK_IN) then
+            if np_st = PARSE_GPVTG_SENTENCE0 then
+                state_after_checksum <= C_GPVTG_Return_State;
+            elsif np_st = PARSE_GPGGA_SENTENCE0 then
+                state_after_checksum <= C_GPGGA_Return_State;
+            elsif np_st = PARSE_GPRMC_SENTENCE0 then
+                state_after_checksum <= C_GPRMC_Return_State;
+            elsif np_st = PARSE_GPGSA_SENTENCE0 then
+                state_after_checksum <= C_GPGSA_Return_State;
+            elsif np_st = PARSE_GPGSV_SENTENCE0 then
+                state_after_checksum <= C_GPGSV_Return_State;
+            end if;
+        end if;
+    end process;
+
+    WRITE_VALUES: process(CLK_IN)
+    begin
+        if rising_edge(CLK_IN) then
+            if np_st = WRITE_GPVTG_VALUES then
+                velocity_int_len_rd <= slv(velocity_int_len);
+                velocity_dec_len_rd <= slv(velocity_dec_len);
+                velocity_int_rd <= slv(velocity_int);
+                velocity_dec_rd <= slv(velocity_dec);
+            elsif np_st = WRITE_GPGGA_VALUES then
+                time_val_rd <= slv(time_val);
+                is_locked_rd <= slv(is_locked);
+                num_satellites_rd <= slv(num_satellites);
+                num_satellites_count_rd <= slv(num_satellites_count);
+            end if;
+        end if;
+    end process;
+
+    READ_DATA: process(CLK_IN)
+    begin
+        if rising_edge(CLK_IN) then
+            if ADDR_IN = X"00" then
+                DATA_OUT <= X"0"&velocity_int_len_rd;
+            elsif ADDR_IN = X"01" then
+                DATA_OUT <= velocity_int_rd(47 downto 40);
+            elsif ADDR_IN = X"02" then
+                DATA_OUT <= velocity_int_rd(39 downto 32);
+            elsif ADDR_IN = X"03" then
+                DATA_OUT <= velocity_int_rd(31 downto 24);
+            elsif ADDR_IN = X"04" then
+                DATA_OUT <= velocity_int_rd(23 downto 16);
+            elsif ADDR_IN = X"05" then
+                DATA_OUT <= velocity_int_rd(15 downto 8);
+            elsif ADDR_IN = X"06" then
+                DATA_OUT <= velocity_int_rd(7 downto 0);
+            elsif ADDR_IN = X"07" then
+                DATA_OUT <= X"0"&velocity_dec_len_rd;
+            elsif ADDR_IN = X"08" then
+                DATA_OUT <= velocity_dec_rd(47 downto 40);
+            elsif ADDR_IN = X"09" then
+                DATA_OUT <= velocity_dec_rd(39 downto 32);
+            elsif ADDR_IN = X"0A" then
+                DATA_OUT <= velocity_dec_rd(31 downto 24);
+            elsif ADDR_IN = X"0B" then
+                DATA_OUT <= velocity_dec_rd(23 downto 16);
+            elsif ADDR_IN = X"0C" then
+                DATA_OUT <= velocity_dec_rd(15 downto 8);
+            elsif ADDR_IN = X"0D" then
+                DATA_OUT <= velocity_dec_rd(7 downto 0);
+            elsif ADDR_IN = X"0E" then
+                DATA_OUT <= time_val_rd(47 downto 40);
+            elsif ADDR_IN = X"0F" then
+                DATA_OUT <= time_val_rd(39 downto 32);
+            elsif ADDR_IN = X"10" then
+                DATA_OUT <= time_val_rd(31 downto 24);
+            elsif ADDR_IN = X"11" then
+                DATA_OUT <= time_val_rd(23 downto 16);
+            elsif ADDR_IN = X"12" then
+                DATA_OUT <= time_val_rd(15 downto 8);
+            elsif ADDR_IN = X"13" then
+                DATA_OUT <= time_val_rd(7 downto 0);
+            elsif ADDR_IN = X"14" then
+                DATA_OUT <= is_locked_rd;
+            elsif ADDR_IN = X"15" then
+                DATA_OUT <= X"0"&num_satellites_count_rd;
+            elsif ADDR_IN = X"16" then
+                DATA_OUT <= num_satellites_rd(15 downto 8);
+            elsif ADDR_IN = X"17" then
+                DATA_OUT <= num_satellites_rd(7 downto 0);
             end if;
         end if;
     end process;
