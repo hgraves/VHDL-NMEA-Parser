@@ -251,7 +251,7 @@ begin
             if calc_state(2) = '1' then
                 sec_from_days <= (others => '0');
             elsif calc_state(8) = '1' then
-                sec_from_days <= X"0"&utc_day_bin * C_day_to_sec;
+                sec_from_days <= (X"0"&utc_day_bin) * C_day_to_sec;
             end if;
             if calc_state(3) = '1' then
                 sec_from_leap_days <= (others => '0');
@@ -261,12 +261,12 @@ begin
             if calc_state(4) = '1' then
                 sec_from_hours <= (others => '0');
             elsif calc_state(10) = '1' then
-                sec_from_hours <= X"00"&utc_hour_bin * C_hour_to_sec;
+                sec_from_hours <= (X"00"&utc_hour_bin) * C_hour_to_sec;
             end if;
             if calc_state(5) = '1' then
                 sec_from_min <= (others => '0');
             elsif calc_state(11) = '1' then
-                sec_from_min <= X"00"&utc_min_bin * C_min_to_sec;
+                sec_from_min <= (X"00"&utc_min_bin) * C_min_to_sec;
             end if;
             if calc_state(7) = '1' then
                 epoch_time_calc <= sec_from_years;
@@ -282,6 +282,8 @@ begin
                 epoch_time_calc <= epoch_time_calc + sec_from_min;
             elsif calc_state(13) = '1' then
                 epoch_time_calc <= epoch_time_calc + utc_sec_bin;
+            elsif calc_state(14) = '1' then
+                epoch_time_calc <= epoch_time_calc + unsigned(X"0000000" & UTC_LEAP_SEC_IN);
             end if;
         end if;
     end process;
