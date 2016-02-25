@@ -41,15 +41,17 @@ ARCHITECTURE behavior OF TB_nmea_parser IS
  
     COMPONENT nmea_parser
     PORT(
-         CLK_IN         : IN  std_logic;
-         RST_IN         : IN  std_logic;
-         NMEA_EN_IN     : IN  std_logic;
-         NMEA_DATA_IN   : IN  std_logic_vector(7 downto 0);
-         NMEA_EN_OUT    : OUT STD_LOGIC;
-         NMEA_DATA_OUT  : OUT STD_LOGIC_VECTOR(7 downto 0);
-         NMEA_EN_ACK_IN : IN STD_LOGIC;
-         ADDR_IN        : IN  std_logic_vector(7 downto 0);
-         DATA_OUT       : OUT  std_logic_vector(7 downto 0));
+         CLK_IN         			: IN  std_logic;
+         RST_IN         			: IN  std_logic;
+         NMEA_EN_IN     			: IN  std_logic;
+         NMEA_DATA_IN   			: IN  std_logic_vector(7 downto 0);
+         NMEA_EN_OUT    			: OUT STD_LOGIC;
+         NMEA_DATA_OUT  			: OUT STD_LOGIC_VECTOR(7 downto 0);
+         NMEA_EN_ACK_IN 			: IN STD_LOGIC;
+			NEW_TIMESTAMP_EN_OUT    : OUT STD_LOGIC;
+         TIMESTAMP_DATA_OUT      : OUT STD_LOGIC_VECTOR(31 downto 0);
+         ADDR_IN        			: IN  std_logic_vector(7 downto 0);
+         DATA_OUT       			: OUT  std_logic_vector(7 downto 0));
     END COMPONENT;
     
     COMPONENT uart
@@ -71,14 +73,16 @@ ARCHITECTURE behavior OF TB_nmea_parser IS
     END COMPONENT;
 
    --Inputs
-   signal CLK_IN        : std_logic := '0';
-   signal RST_IN        : std_logic := '0';
-   signal NMEA_EN_IN    : std_logic := '0';
-   signal NMEA_DATA_IN  : std_logic_vector(7 downto 0) := (others => '0');
-   signal ADDR_IN       : std_logic_vector(7 downto 0) := (others => '0');
-   signal NMEA_EN_OUT    : STD_LOGIC;
-   signal NMEA_DATA_OUT  : STD_LOGIC_VECTOR(7 downto 0);
-   signal NMEA_EN_ACK_IN : STD_LOGIC;
+   signal CLK_IN        			: std_logic := '0';
+   signal RST_IN        			: std_logic := '0';
+   signal NMEA_EN_IN    			: std_logic := '0';
+   signal NMEA_DATA_IN  			: std_logic_vector(7 downto 0) := (others => '0');
+   signal ADDR_IN       			: std_logic_vector(7 downto 0) := (others => '0');
+   signal NMEA_EN_OUT    			: STD_LOGIC;
+   signal NMEA_DATA_OUT  			: STD_LOGIC_VECTOR(7 downto 0);
+   signal NMEA_EN_ACK_IN 			: STD_LOGIC;
+   signal NEW_TIMESTAMP_EN_OUT   : STD_LOGIC;
+	signal TIMESTAMP_DATA_OUT     : STD_LOGIC_VECTOR(31 downto 0);
 
  	--Outputs
    signal DATA_OUT : std_logic_vector(7 downto 0);
@@ -91,16 +95,19 @@ ARCHITECTURE behavior OF TB_nmea_parser IS
 BEGIN
  
 	-- Instantiate the Unit Under Test (UUT)
-   uut: nmea_parser PORT MAP (
-          CLK_IN          => CLK_IN,
-          RST_IN          => RST_IN,
-          NMEA_EN_IN      => NMEA_EN_IN,
-          NMEA_DATA_IN    => NMEA_DATA_IN,
-          NMEA_EN_OUT     => NMEA_EN_OUT,
-          NMEA_DATA_OUT   => NMEA_DATA_OUT,
-          NMEA_EN_ACK_IN  => NMEA_EN_ACK_IN,
-          ADDR_IN         => ADDR_IN,
-          DATA_OUT        => DATA_OUT
+   uut: nmea_parser
+	PORT MAP (
+          CLK_IN          			=> CLK_IN,
+          RST_IN          			=> RST_IN,
+          NMEA_EN_IN      			=> NMEA_EN_IN,
+          NMEA_DATA_IN   			=> NMEA_DATA_IN,
+          NMEA_EN_OUT     			=> NMEA_EN_OUT,
+          NMEA_DATA_OUT   			=> NMEA_DATA_OUT,
+          NMEA_EN_ACK_IN  			=> NMEA_EN_ACK_IN,
+			 NEW_TIMESTAMP_EN_OUT   => NEW_TIMESTAMP_EN_OUT,
+			 TIMESTAMP_DATA_OUT 		=> TIMESTAMP_DATA_OUT,
+          ADDR_IN         			=> ADDR_IN,
+          DATA_OUT        			=> DATA_OUT
         );
 
    uut2: uart
@@ -134,7 +141,7 @@ BEGIN
    stim_proc: process
    begin		
       -- hold reset state for 100 ns.
-      wait for CLK_IN_period * 100000;	
+      wait for CLK_IN_period * 1000;	
 
 --      NMEA_EN_IN <= '1';
 --      NMEA_DATA_IN <= X"24";

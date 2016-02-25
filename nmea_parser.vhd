@@ -5,18 +5,21 @@ use IEEE.MATH_REAL.ALL;
 
 entity nmea_parser is
     port (  
-            CLK_IN          : IN  STD_LOGIC;
-            RST_IN          : IN  STD_LOGIC; 
+            CLK_IN                  : IN  STD_LOGIC;
+            RST_IN                  : IN  STD_LOGIC; 
             
-            NMEA_EN_IN      : IN  STD_LOGIC;
-            NMEA_DATA_IN    : IN  STD_LOGIC_VECTOR(7 downto 0);
+            NMEA_EN_IN              : IN  STD_LOGIC;
+            NMEA_DATA_IN            : IN  STD_LOGIC_VECTOR(7 downto 0);
 
-            NMEA_EN_OUT     : OUT STD_LOGIC;
-            NMEA_DATA_OUT   : OUT STD_LOGIC_VECTOR(7 downto 0);
-            NMEA_EN_ACK_IN  : IN STD_LOGIC;
+            NMEA_EN_OUT             : OUT STD_LOGIC;
+            NMEA_DATA_OUT           : OUT STD_LOGIC_VECTOR(7 downto 0);
+            NMEA_EN_ACK_IN          : IN STD_LOGIC;
 
-            ADDR_IN         : IN  STD_LOGIC_VECTOR(7 downto 0);
-            DATA_OUT        : OUT  STD_LOGIC_VECTOR(7 downto 0));
+            NEW_TIMESTAMP_EN_OUT    : OUT STD_LOGIC;
+            TIMESTAMP_DATA_OUT      : OUT STD_LOGIC_VECTOR(31 downto 0);
+
+            ADDR_IN                 : IN  STD_LOGIC_VECTOR(7 downto 0);
+            DATA_OUT                : OUT  STD_LOGIC_VECTOR(7 downto 0));
 end nmea_parser;
 
 architecture Behavioral of nmea_parser is
@@ -41,7 +44,6 @@ COMPONENT TDP_RAM
     Generic (   G_DATA_A_SIZE   :natural :=8;
                 G_ADDR_A_SIZE   :natural :=9;
                 G_RELATION      :natural :=1;
-                G_INIT_ZERO     :boolean := true;
                 G_INIT_FILE     :string :="");--log2(SIZE_A/SIZE_B)
    Port (   CLK_A_IN    : in  STD_LOGIC;
             WE_A_IN     : in  STD_LOGIC;
@@ -53,6 +55,27 @@ COMPONENT TDP_RAM
             ADDR_B_IN   : in  STD_LOGIC_VECTOR (G_ADDR_A_SIZE+G_RELATION-1 downto 0);
             DATA_B_IN   : in  STD_LOGIC_VECTOR (G_DATA_A_SIZE/(2**G_RELATION)-1 downto 0);
             DATA_B_OUT  : out STD_LOGIC_VECTOR (G_DATA_A_SIZE/(2**G_RELATION)-1 downto 0));
+END COMPONENT;
+
+COMPONENT utc_to_ptp_timestamp
+    port (  
+        CLK_IN                      : IN  STD_LOGIC;
+        RST_IN                      : IN  STD_LOGIC;
+
+        DO_CONV_IN                  : IN  STD_LOGIC;
+        CONV_DONE_OUT               : OUT  STD_LOGIC;
+        
+        BCD_UTC_YEAR_IN             : IN  STD_LOGIC_VECTOR(15 downto 0);
+        BCD_UTC_MONTH_IN            : IN  STD_LOGIC_VECTOR(7 downto 0);
+        BCD_UTC_DAY_IN              : IN  STD_LOGIC_VECTOR(7 downto 0);
+        BCD_UTC_HOUR_IN             : IN  STD_LOGIC_VECTOR(7 downto 0);
+        BCD_UTC_MIN_IN              : IN  STD_LOGIC_VECTOR(7 downto 0);
+        BCD_UTC_SEC_IN              : IN  STD_LOGIC_VECTOR(7 downto 0);
+
+        UTC_TIMEZONE_HOUR_OFFSET_IN : IN  STD_LOGIC_VECTOR(7 downto 0);
+        UTC_LEAP_SEC_IN             : IN  STD_LOGIC_VECTOR(7 downto 0);
+
+        TIMESTAMP_OUT               : OUT STD_LOGIC_VECTOR(31 downto 0));
 END COMPONENT;
 
 constant C_start_sentence_delimiter                     : std_logic_vector(7 downto 0) := to_slv("$");
@@ -125,6 +148,10 @@ signal year_count                                       : unsigned(3 downto 0) :
 signal year, year_rd                                    : std_logic_vector(31 downto 0) := (others => '0');
 signal local_zone, local_zone_rd                        : std_logic_vector(15 downto 0) := (others => '0');
 signal lz_count                                         : unsigned(3 downto 0) := (others => '0');
+
+signal year_bcd                                         : std_logic_vector(15 downto 0);
+signal hour_bcd, month_bcd, day_bcd, min_bcd, sec_bcd   : std_logic_vector(7 downto 0);
+signal perform_utc_to_timestamp_conv 						  : std_logic := '0';
 
 type NMEA_PARSE_STATE is (
                             STARTUP_DELAY,
@@ -658,8 +685,41 @@ begin
                 year_rd <= year;
                 local_zone_rd <= local_zone;
             end if;
+            if np_st = WRITE_GPZDA_VALUES then
+                perform_utc_to_timestamp_conv <= '1';
+            else
+                perform_utc_to_timestamp_conv <= '0';
+            end if;
         end if;
     end process;
+
+    year_bcd <= year_rd(27 downto 24) & year_rd(19 downto 16) & year_rd(11 downto 8) & year_rd(3 downto 0);
+    month_bcd <= month_rd(11 downto 8) & month_rd(3 downto 0);
+    day_bcd <= day_rd(11 downto 8) & day_rd(3 downto 0);
+
+    hour_bcd <= utc_rd(43 downto 40) & utc_rd(35 downto 32);
+    min_bcd <= utc_rd(27 downto 24) & utc_rd(19 downto 16);
+    sec_bcd <= utc_rd(11 downto 8) & utc_rd(3 downto 0);
+
+    UTC_to_ptp_timestamp_inst : utc_to_ptp_timestamp
+    port map (  
+        CLK_IN                      => CLK_IN,
+        RST_IN                      => '0',
+
+        DO_CONV_IN                  => perform_utc_to_timestamp_conv,
+        CONV_DONE_OUT               => NEW_TIMESTAMP_EN_OUT,
+
+        BCD_UTC_YEAR_IN             => year_bcd,
+        BCD_UTC_MONTH_IN            => month_bcd,
+        BCD_UTC_DAY_IN              => day_bcd,
+        BCD_UTC_HOUR_IN             => hour_bcd,
+        BCD_UTC_MIN_IN              => min_bcd,
+        BCD_UTC_SEC_IN              => sec_bcd,
+
+        UTC_TIMEZONE_HOUR_OFFSET_IN => X"0A",
+        UTC_LEAP_SEC_IN             => X"1A",
+
+        TIMESTAMP_OUT               => TIMESTAMP_DATA_OUT);
 
     GPGZDA_PARSE: process(CLK_IN)
     begin
@@ -790,7 +850,6 @@ begin
         Generic Map(    G_DATA_A_SIZE   => 8,
                         G_ADDR_A_SIZE   => 8,
                         G_RELATION      => 0, 
-                        G_INIT_ZERO     => false,
                         G_INIT_FILE     => "./coe_dir/SIRF_3_GPS.coe")
 
         Port Map (      CLK_A_IN        => CLK_IN,

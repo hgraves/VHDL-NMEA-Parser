@@ -5,22 +5,23 @@ use IEEE.MATH_REAL.ALL;
 
 entity utc_to_ptp_timestamp is
     port (  
-            CLK_IN                  : IN  STD_LOGIC;
-            RST_IN                  : IN  STD_LOGIC;
+            CLK_IN                          : IN  STD_LOGIC;
+            RST_IN                          : IN  STD_LOGIC;
 
-            DO_CONV_IN              : IN  STD_LOGIC;
-            CONV_DONE_OUT           : OUT  STD_LOGIC;
+            DO_CONV_IN                      : IN  STD_LOGIC;
+            CONV_DONE_OUT                   : OUT  STD_LOGIC;
             
-            BCD_UTC_YEAR_IN         : IN  STD_LOGIC_VECTOR(15 downto 0);
-            BCD_UTC_MONTH_IN        : IN  STD_LOGIC_VECTOR(7 downto 0);
-            BCD_UTC_DAY_IN          : IN  STD_LOGIC_VECTOR(7 downto 0);
-            BCD_UTC_HOUR_IN         : IN  STD_LOGIC_VECTOR(7 downto 0);
-            BCD_UTC_MIN_IN          : IN  STD_LOGIC_VECTOR(7 downto 0);
-            BCD_UTC_SEC_IN          : IN  STD_LOGIC_VECTOR(7 downto 0);
+            BCD_UTC_YEAR_IN                 : IN  STD_LOGIC_VECTOR(15 downto 0);
+            BCD_UTC_MONTH_IN                : IN  STD_LOGIC_VECTOR(7 downto 0);
+            BCD_UTC_DAY_IN                  : IN  STD_LOGIC_VECTOR(7 downto 0);
+            BCD_UTC_HOUR_IN                 : IN  STD_LOGIC_VECTOR(7 downto 0);
+            BCD_UTC_MIN_IN                  : IN  STD_LOGIC_VECTOR(7 downto 0);
+            BCD_UTC_SEC_IN                  : IN  STD_LOGIC_VECTOR(7 downto 0);
 
-            UTC_LEAP_SEC_IN         : IN  STD_LOGIC_VECTOR(7 downto 0);
+            UTC_TIMEZONE_HOUR_OFFSET_IN     : IN  STD_LOGIC_VECTOR(7 downto 0);
+            UTC_LEAP_SEC_IN                 : IN  STD_LOGIC_VECTOR(7 downto 0);
 
-            TIMESTAMP_OUT           : OUT STD_LOGIC_VECTOR(31 downto 0));
+            TIMESTAMP_OUT                   : OUT STD_LOGIC_VECTOR(31 downto 0));
 end utc_to_ptp_timestamp;
 
 architecture Behavioral of utc_to_ptp_timestamp is
@@ -209,6 +210,8 @@ begin
                 utc_hour_bin <= unsigned(BCD_UTC_HOUR_IN(7 downto 4)) * C_ten;
             elsif calc_state(1) = '1' then
                 utc_hour_bin <= utc_hour_bin + unsigned(X"0" & BCD_UTC_HOUR_IN(3 downto 0));
+            elsif calc_state(2) = '1' then
+                utc_hour_bin <= utc_hour_bin + unsigned(UTC_TIMEZONE_HOUR_OFFSET_IN(7 downto 0));
             end if;
         end if;
     end process;
@@ -283,7 +286,7 @@ begin
             elsif calc_state(13) = '1' then
                 epoch_time_calc <= epoch_time_calc + utc_sec_bin;
             elsif calc_state(14) = '1' then
-                epoch_time_calc <= epoch_time_calc + unsigned(X"0000000" & UTC_LEAP_SEC_IN);
+                epoch_time_calc <= epoch_time_calc + unsigned(X"000000" & UTC_LEAP_SEC_IN);
             end if;
         end if;
     end process;
